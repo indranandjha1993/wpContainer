@@ -1,0 +1,50 @@
+name: Build and Push to AWS ECR
+
+on:
+  push:
+    branches:
+      - dev
+      - qa
+      - master
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_BUCKET_NAME: vserve-secret
+      ENV_FILE_PATH_IN_S3: ${{ github.ref_name }}/.env
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Fetch .env from S3
+        run: aws s3 cp s3://$S3_BUCKET_NAME/$ENV_FILE_PATH_IN_S3 .env
+
+      - name: Build, Tag, and Push PHP Apache
+        run: |
+          ECR_REPOSITORY_NAME="vserve-${{ github.ref_name }}"
+          IMAGE_TAG_PHP_APACHE=latest-php-apache
+          COMMIT_ID=$(echo ${{ github.sha }} | cut -c1-7)
+          DATE=$(date +%Y%m%d)
+          ADDITIONAL_TAG="${COMMIT_ID}-${DATE}-php-apache"
+          ECR_REPOSITORY_URI="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${ECR_REPOSITORY_NAME}"
+
+          docker build -t $ECR_REPOSITORY_URI:$IMAGE_TAG_PHP_APACHE -f Dockerfile .
+          docker tag $ECR_REPOSITORY_URI:$IMAGE_TAG_PHP_APACHE $ECR_REPOSITORY_URI:$ADDITIONAL_TAG
+
+          docker push $ECR_REPOSITORY_URI:$IMAGE_TAG_PHP_APACHE
+          docker push $ECR_REPOSITORY_URI:$ADDITIONAL_TAG
